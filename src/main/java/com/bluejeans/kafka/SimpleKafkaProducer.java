@@ -73,6 +73,10 @@ public class SimpleKafkaProducer<K, V> {
     }
 
     public boolean send(final K key, final V value) {
+        return send(topic, key, value);
+    }
+
+    public boolean send(final String topic, final K key, final V value) {
         boolean status = true;
         if (async) {
             for (final String topicStr : topic.split(",")) {
