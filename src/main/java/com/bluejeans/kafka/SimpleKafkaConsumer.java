@@ -65,7 +65,7 @@ public class SimpleKafkaConsumer<K, V> {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private List<KafkaRecordProcessor<K, V>> recordProcessors;
     private final EnumCounter<Status> statusCounter = new EnumCounter<Status>(Status.class);
-    private final List<Thread> runThreads = new ArrayList<>();
+    private final List<KafkaConsumerThread> runThreads = new ArrayList<>();
     private Thread monitorThread;
     private boolean monitorEnabled = true;
     private String name = "kafka-consumer";
@@ -111,6 +111,86 @@ public class SimpleKafkaConsumer<K, V> {
         consumers.clear();
         for (int index = 0; index < consumerCount; index++) {
             consumers.add(new KafkaConsumer<K, V>(props, keyDeserializer, valueDeserializer));
+        }
+    }
+
+    public class KafkaConsumerThread extends Thread {
+
+        private final KafkaConsumer<K, V> consumer;
+
+        private Set<TopicPartition> currentAssignment;
+
+        /**
+         * @param consumer
+         */
+        public KafkaConsumerThread(final KafkaConsumer<K, V> consumer) {
+            super();
+            this.consumer = consumer;
+        }
+
+        @Override
+        public void run() {
+            if (specificPartitions) {
+                consumer.assign(partitions);
+                for (final TopicPartition partition : partitions) {
+                    final OffsetAndMetadata meta = consumer.committed(partition);
+                    if (meta != null) {
+                        logger.info("For partition - " + partition + " meta - " + meta);
+                        consumer.seek(partition, meta.offset());
+                    } else {
+                        logger.info("For partition - " + partition + " no meta, seeking to beginning");
+                        consumer.seekToBeginning(partition);
+                    }
+                    logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
+                }
+            } else {
+                consumer.subscribe(new ArrayList<>(topics));
+            }
+            try {
+                while (running.get()) {
+                    currentAssignment = consumer.assignment();
+                    for (final TopicPartition tp : currentAssignment) {
+                        final OffsetAndMetadata meta = consumer.committed(tp);
+                        final long consumedMessages = meta != null ? meta.offset() : 0;
+                        partitionConsumes.get(tp.topic()).put(tp.partition(), consumedMessages);
+                    }
+                    final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
+                    statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
+                    // Handle records
+                    if (recordProcessors != null) {
+                        for (final ConsumerRecord<K, V> record : records) {
+                            final KafkaProcessorContext<K, V> context = new KafkaProcessorContext<K, V>(record);
+                            for (final KafkaRecordProcessor<K, V> processor : recordProcessors) {
+                                try {
+                                    processor.processKafkaRecord(record, context);
+                                } catch (final RuntimeException re) {
+                                    statusCounter.incrementEventCount(Status.PROCESS_ERROR);
+                                    logger.warn(
+                                            "Failed to process record - " + record + " using processor - " + processor,
+                                            re);
+                                }
+                            }
+                        }
+                    }
+                    if (commitSyncEnabled) {
+                        consumer.commitSync();
+                    }
+                }
+            } catch (final WakeupException we) {
+                if (running.get()) {
+                    throw we;
+                }
+            } finally {
+                consumer.close();
+            }
+        }
+
+        public KafkaConsumer<K, V> getConsumer() {
+            return consumer;
+        }
+
+        public Set<TopicPartition> getCurrentAssignment() {
+            return currentAssignment;
         }
     }
 
@@ -168,8 +248,7 @@ public class SimpleKafkaConsumer<K, V> {
                                 partitionQueueSizes.get(tp.topic()).put(tp.partition(), position);
                                 final Map<Integer, Long> consumeMap = partitionConsumes.get(tp.topic());
                                 if (consumeMap.containsKey(tp.partition())) {
-                                    partitionLags.get(tp.topic()).put(
-                                            tp.partition(),
+                                    partitionLags.get(tp.topic()).put(tp.partition(),
                                             partitionQueueSizes.get(tp.topic()).get(tp.partition()).longValue()
                                                     - consumeMap.get(tp.partition()).longValue());
                                 }
@@ -194,66 +273,8 @@ public class SimpleKafkaConsumer<K, V> {
             }
             runThreads.clear();
             for (int index = 0; index < consumerCount; index++) {
-                final int finalIndex = index;
-                final Thread runThread = new Thread() {
-                    private final KafkaConsumer<K, V> consumer = SimpleKafkaConsumer.this.consumers.get(finalIndex);
-                    @Override
-                    public void run() {
-                        if (specificPartitions) {
-                            consumer.assign(partitions);
-                            for (final TopicPartition partition : partitions) {
-                                final OffsetAndMetadata meta = consumer.committed(partition);
-                                if (meta != null) {
-                                    logger.info("For partition - " + partition + " meta - " + meta);
-                                    consumer.seek(partition, meta.offset());
-                                } else {
-                                    logger.info("For partition - " + partition + " no meta, seeking to beginning");
-                                    consumer.seekToBeginning(partition);
-                                }
-                                logger.info("Partition - " + partition + " @ position - "
-                                        + consumer.position(partition));
-                            }
-                        } else {
-                            consumer.subscribe(new ArrayList<>(topics));
-                        }
-                        try {
-                            while (running.get()) {
-                                for (final TopicPartition tp : consumer.assignment()) {
-                                    final OffsetAndMetadata meta = consumer.committed(tp);
-                                    final long consumedMessages = meta != null ? meta.offset() : 0;
-                                    partitionConsumes.get(tp.topic()).put(tp.partition(), consumedMessages);
-                                }
-                                final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
-                                statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
-                                // Handle records
-                                if (recordProcessors != null) {
-                                    for (final ConsumerRecord<K, V> record : records) {
-                                        final KafkaProcessorContext<K, V> context = new KafkaProcessorContext<K, V>(
-                                                record);
-                                        for (final KafkaRecordProcessor<K, V> processor : recordProcessors) {
-                                            try {
-                                                processor.processKafkaRecord(record, context);
-                                            } catch (final RuntimeException re) {
-                                                statusCounter.incrementEventCount(Status.PROCESS_ERROR);
-                                                logger.warn("Failed to process record - " + record
-                                                        + " using processor - " + processor, re);
-                                            }
-                                        }
-                                    }
-                                }
-                                if (commitSyncEnabled) {
-                                    consumer.commitSync();
-                                }
-                            }
-                        } catch (final WakeupException we) {
-                            if (running.get()) {
-                                throw we;
-                            }
-                        } finally {
-                            consumer.close();
-                        }
-                    }
-                };
+                final KafkaConsumerThread runThread = new KafkaConsumerThread(
+                        SimpleKafkaConsumer.this.consumers.get(index));
                 runThread.setName(name + "-" + index);
                 runThread.start();
                 runThreads.add(runThread);
@@ -406,7 +427,7 @@ public class SimpleKafkaConsumer<K, V> {
     /**
      * @return the runThreads
      */
-    public List<Thread> getRunThreads() {
+    public List<KafkaConsumerThread> getRunThreads() {
         return runThreads;
     }
 
