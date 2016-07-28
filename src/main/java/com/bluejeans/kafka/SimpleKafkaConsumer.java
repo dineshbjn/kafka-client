@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.bluejeans.utils.EnumCounter;
+import com.bluejeans.utils.MetaUtil;
 
 /**
  * Kafka String based consumer
@@ -114,6 +115,11 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
+    private void ensureAssignment(final KafkaConsumer<K, V> consumer) {
+        MetaUtil.runNestedMethodsSilently(consumer,
+                "$coordinator..ensureCoordinatorKnown;;$coordinator..ensurePartitionAssignment");
+    }
+
     public class KafkaConsumerThread extends Thread {
 
         private final KafkaConsumer<K, V> consumer;
@@ -147,6 +153,7 @@ public class SimpleKafkaConsumer<K, V> {
                 consumer.subscribe(new ArrayList<>(topics));
             }
             try {
+                ensureAssignment(consumer);
                 while (running.get()) {
                     currentAssignment = consumer.assignment();
                     for (final TopicPartition tp : currentAssignment) {
