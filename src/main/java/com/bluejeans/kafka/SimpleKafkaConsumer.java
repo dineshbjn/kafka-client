@@ -52,6 +52,7 @@ public class SimpleKafkaConsumer<K, V> {
     private String groupId = "local";
     private boolean enableAutoCommit = false;
     private boolean commitSyncEnabled = true;
+    private boolean repostEnabled = false;
     private int autoCommitIntervalMillis = 1000;
     private int sessionTimeoutMillis = 30000;
     private Deserializer<K> keyDeserializer;
@@ -62,6 +63,7 @@ public class SimpleKafkaConsumer<K, V> {
     private int monitorSleepMillis = 10000;
     private Map<String, Object> extraProps = new HashMap<>();
     private final List<KafkaConsumer<K, V>> consumers = new ArrayList<>();
+    private SimpleKafkaProducer<K, V> simpleProducer = null;
     private KafkaConsumer<K, V> monitor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private List<KafkaRecordProcessor<K, V>> recordProcessors;
@@ -112,6 +114,13 @@ public class SimpleKafkaConsumer<K, V> {
         consumers.clear();
         for (int index = 0; index < consumerCount; index++) {
             consumers.add(new KafkaConsumer<K, V>(props, keyDeserializer, valueDeserializer));
+        }
+        if (repostEnabled) {
+            simpleProducer = new SimpleKafkaProducer<>();
+            simpleProducer.setAsync(false);
+            simpleProducer.setClientId(groupId);
+            simpleProducer.setServer(server);
+            simpleProducer.init();
         }
     }
 
@@ -166,16 +175,21 @@ public class SimpleKafkaConsumer<K, V> {
                     // Handle records
                     if (recordProcessors != null) {
                         for (final ConsumerRecord<K, V> record : records) {
+                            boolean failed = false;
                             final KafkaProcessorContext<K, V> context = new KafkaProcessorContext<K, V>(record);
                             for (final KafkaRecordProcessor<K, V> processor : recordProcessors) {
                                 try {
                                     processor.processKafkaRecord(record, context);
                                 } catch (final RuntimeException re) {
+                                    failed = true;
                                     statusCounter.incrementEventCount(Status.PROCESS_ERROR);
                                     logger.warn(
                                             "Failed to process record - " + record + " using processor - " + processor,
                                             re);
                                 }
+                            }
+                            if (repostEnabled && failed) {
+                                simpleProducer.send(record);
                             }
                         }
                     }
@@ -317,6 +331,9 @@ public class SimpleKafkaConsumer<K, V> {
             consumer.wakeup();
         }
         monitor.wakeup();
+        if (simpleProducer != null) {
+            simpleProducer.shutdown();
+        }
     }
 
     /**
@@ -691,6 +708,14 @@ public class SimpleKafkaConsumer<K, V> {
      */
     public void setName(final String name) {
         this.name = name;
+    }
+
+    public boolean isRepostEnabled() {
+        return repostEnabled;
+    }
+
+    public void setRepostEnabled(final boolean repostEnabled) {
+        this.repostEnabled = repostEnabled;
     }
 
 }

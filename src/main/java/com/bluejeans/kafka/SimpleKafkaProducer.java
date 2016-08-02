@@ -10,6 +10,7 @@ import java.util.concurrent.ExecutionException;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -74,6 +75,10 @@ public class SimpleKafkaProducer<K, V> {
 
     public boolean send(final K key, final V value) {
         return send(topic, key, value);
+    }
+
+    public boolean send(final ConsumerRecord<K, V> record) {
+        return send(record.topic() + ":" + record.partition(), record.key(), record.value());
     }
 
     public boolean send(final String topic, final K key, final V value) {
