@@ -60,7 +60,7 @@ public class SimpleKafkaConsumer<K, V> {
     private Deserializer<V> valueDeserializer;
     private String topic;
     private boolean specificPartitions = false;
-    private int pollTimeout = 10000;
+    private int pollTimeout = 2000;
     private int monitorSleepMillis = 10000;
     private Map<String, Object> extraProps = new HashMap<>();
     private final List<KafkaConsumer<K, V>> consumers = new ArrayList<>();
