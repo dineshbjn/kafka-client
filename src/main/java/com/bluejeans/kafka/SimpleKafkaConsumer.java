@@ -5,6 +5,7 @@ package com.bluejeans.kafka;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -130,6 +131,28 @@ public class SimpleKafkaConsumer<K, V> {
                 "$coordinator..ensureCoordinatorKnown;;$coordinator..ensurePartitionAssignment");
     }
 
+    private void seek(final KafkaConsumer<K, V> consumer, final TopicPartition partition, final boolean end) {
+        try {
+            if (end) {
+                seek(consumer, partition, "seekToEnd");
+            } else {
+                seek(consumer, partition, "seekToBeginning");
+            }
+        } catch (final ReflectiveOperationException ex) {
+            logger.error("could not seek", ex);
+        }
+    }
+
+    private void seek(final KafkaConsumer<K, V> consumer, final TopicPartition partition, final String methodName)
+            throws ReflectiveOperationException {
+        try {
+            consumer.getClass().getMethod(methodName, TopicPartition.class);
+            consumer.getClass().getMethod(methodName, TopicPartition.class).invoke(consumer, partition);
+        } catch (final NoSuchMethodException ex) {
+            consumer.getClass().getMethod(methodName, Collection.class).invoke(consumer, Arrays.asList(partition));
+        }
+    }
+
     public class KafkaConsumerThread extends Thread {
 
         private final KafkaConsumer<K, V> consumer;
@@ -155,7 +178,7 @@ public class SimpleKafkaConsumer<K, V> {
                         consumer.seek(partition, meta.offset());
                     } else {
                         logger.info("For partition - " + partition + " no meta, seeking to beginning");
-                        consumer.seekToBeginning(partition);
+                        seek(consumer, partition, false);
                     }
                     logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
                 }
@@ -267,7 +290,7 @@ public class SimpleKafkaConsumer<K, V> {
                                 topicQueueSizes.get(topic).set(0);
                             }
                             for (final TopicPartition tp : monPartitions) {
-                                monitor.seekToEnd(tp);
+                                seek(monitor, tp, true);
                                 final long position = monitor.position(tp);
                                 topicQueueSizes.get(tp.topic()).addAndGet(position);
                                 partitionQueueSizes.get(tp.topic()).put(tp.partition(), position);
