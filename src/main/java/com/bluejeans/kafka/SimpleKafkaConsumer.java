@@ -146,8 +146,9 @@ public class SimpleKafkaConsumer<K, V> {
     private static void seek(final KafkaConsumer<?, ?> consumer, final TopicPartition partition,
             final String methodName) throws ReflectiveOperationException {
         try {
-            consumer.getClass().getMethod(methodName, TopicPartition.class);
-            consumer.getClass().getMethod(methodName, TopicPartition.class).invoke(consumer, partition);
+            consumer.getClass().getMethod(methodName, TopicPartition[].class);
+            consumer.getClass().getMethod(methodName, TopicPartition[].class).invoke(consumer,
+                    new Object[] { new TopicPartition[] { partition } });
         } catch (final NoSuchMethodException ex) {
             consumer.getClass().getMethod(methodName, Collection.class).invoke(consumer, Arrays.asList(partition));
         }

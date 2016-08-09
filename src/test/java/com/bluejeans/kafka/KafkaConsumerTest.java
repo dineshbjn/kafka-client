@@ -3,6 +3,8 @@
  */
 package com.bluejeans.kafka;
 
+import org.apache.kafka.common.TopicPartition;
+
 /**
  * kafka consumer test
  *
@@ -19,6 +21,7 @@ public class KafkaConsumerTest {
         consumer.init();
         Thread.sleep(2000);
         System.out.println(consumer.getTopicLag());
+        SimpleKafkaConsumer.seek(consumer.getConsumer(), new TopicPartition("indigo", 0), true);
     }
 
 }
