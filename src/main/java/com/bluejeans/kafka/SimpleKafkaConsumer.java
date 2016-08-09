@@ -71,6 +71,7 @@ public class SimpleKafkaConsumer<K, V> {
     private final List<KafkaConsumerThread> runThreads = new ArrayList<>();
     private Thread monitorThread;
     private boolean monitorEnabled = true;
+    private boolean commitAfterProcess = false;
     private String name = "kafka-consumer";
     private int consumerCount = 1;
     private final Map<String, AtomicLong> topicQueueSizes = new HashMap<>();
@@ -133,7 +134,7 @@ public class SimpleKafkaConsumer<K, V> {
 
         private final KafkaConsumer<K, V> consumer;
 
-        private Set<TopicPartition> currentAssignment;
+        private Set<TopicPartition> currentAssignment = new HashSet<>();
 
         /**
          * @param consumer
@@ -172,6 +173,9 @@ public class SimpleKafkaConsumer<K, V> {
                     }
                     final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
                     statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
+                    if (!commitAfterProcess && commitSyncEnabled) {
+                        consumer.commitSync();
+                    }
                     // Handle records
                     if (recordProcessors != null) {
                         for (final ConsumerRecord<K, V> record : records) {
@@ -193,7 +197,7 @@ public class SimpleKafkaConsumer<K, V> {
                             }
                         }
                     }
-                    if (commitSyncEnabled) {
+                    if (commitAfterProcess && commitSyncEnabled) {
                         consumer.commitSync();
                     }
                 }
@@ -716,6 +720,21 @@ public class SimpleKafkaConsumer<K, V> {
 
     public void setRepostEnabled(final boolean repostEnabled) {
         this.repostEnabled = repostEnabled;
+    }
+
+    /**
+     * @return the commitAfterProcess
+     */
+    public boolean isCommitAfterProcess() {
+        return commitAfterProcess;
+    }
+
+    /**
+     * @param commitAfterProcess
+     *            the commitAfterProcess to set
+     */
+    public void setCommitAfterProcess(final boolean commitAfterProcess) {
+        this.commitAfterProcess = commitAfterProcess;
     }
 
 }
