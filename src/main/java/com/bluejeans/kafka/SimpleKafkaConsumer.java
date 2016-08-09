@@ -171,7 +171,11 @@ public class SimpleKafkaConsumer<K, V> {
         @Override
         public void run() {
             if (specificPartitions) {
-                consumer.assign(partitions);
+                try {
+                    MetaUtil.findFirstMethod(consumer.getClass(), "assign", 1).invoke(consumer, partitions);
+                } catch (final ReflectiveOperationException roe) {
+                    logger.error("could not assign", roe);
+                }
                 for (final TopicPartition partition : partitions) {
                     final OffsetAndMetadata meta = consumer.committed(partition);
                     if (meta != null) {
@@ -184,7 +188,12 @@ public class SimpleKafkaConsumer<K, V> {
                     logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
                 }
             } else {
-                consumer.subscribe(new ArrayList<>(topics));
+                try {
+                    MetaUtil.findFirstMethod(consumer.getClass(), "subscribe", 1).invoke(consumer,
+                            new ArrayList<>(topics));
+                } catch (final ReflectiveOperationException roe) {
+                    logger.error("could not subscribe", roe);
+                }
             }
             try {
                 ensureAssignment(consumer);
@@ -284,7 +293,11 @@ public class SimpleKafkaConsumer<K, V> {
                             monPartitions.add(new TopicPartition(info.topic(), info.partition()));
                         }
                     }
-                    monitor.assign(monPartitions);
+                    try {
+                        MetaUtil.findFirstMethod(monitor.getClass(), "assign", 1).invoke(monitor, monPartitions);
+                    } catch (final ReflectiveOperationException roe) {
+                        logger.error("could not assign", roe);
+                    }
                     try {
                         while (running.get()) {
                             for (final String topic : topics) {
