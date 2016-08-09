@@ -131,7 +131,7 @@ public class SimpleKafkaConsumer<K, V> {
                 "$coordinator..ensureCoordinatorKnown;;$coordinator..ensurePartitionAssignment");
     }
 
-    private void seek(final KafkaConsumer<K, V> consumer, final TopicPartition partition, final boolean end) {
+    public static void seek(final KafkaConsumer<?, ?> consumer, final TopicPartition partition, final boolean end) {
         try {
             if (end) {
                 seek(consumer, partition, "seekToEnd");
@@ -143,8 +143,8 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
-    private void seek(final KafkaConsumer<K, V> consumer, final TopicPartition partition, final String methodName)
-            throws ReflectiveOperationException {
+    private static void seek(final KafkaConsumer<?, ?> consumer, final TopicPartition partition,
+            final String methodName) throws ReflectiveOperationException {
         try {
             consumer.getClass().getMethod(methodName, TopicPartition.class);
             consumer.getClass().getMethod(methodName, TopicPartition.class).invoke(consumer, partition);
