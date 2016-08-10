@@ -71,7 +71,7 @@ public class SimpleKafkaConsumer<K, V> {
     private final EnumCounter<Status> statusCounter = new EnumCounter<Status>(Status.class);
     private final List<KafkaConsumerThread> runThreads = new ArrayList<>();
     private Thread monitorThread;
-    private boolean monitorEnabled = true;
+    private boolean monitorEnabled = false;
     private boolean commitAfterProcess = false;
     private String name = "kafka-consumer";
     private int consumerCount = 1;
@@ -95,7 +95,9 @@ public class SimpleKafkaConsumer<K, V> {
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, server);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, enableAutoCommit);
-        props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, autoCommitIntervalMillis);
+        if (enableAutoCommit) {
+            props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, autoCommitIntervalMillis);
+        }
         props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeoutMillis);
         if (extraProps != null) {
             props.putAll(extraProps);
@@ -199,10 +201,12 @@ public class SimpleKafkaConsumer<K, V> {
                 ensureAssignment(consumer);
                 while (running.get()) {
                     currentAssignment = consumer.assignment();
-                    for (final TopicPartition tp : currentAssignment) {
-                        final OffsetAndMetadata meta = consumer.committed(tp);
-                        final long consumedMessages = meta != null ? meta.offset() : 0;
-                        partitionConsumes.get(tp.topic()).put(tp.partition(), consumedMessages);
+                    if (monitorEnabled) {
+                        for (final TopicPartition tp : currentAssignment) {
+                            final OffsetAndMetadata meta = consumer.committed(tp);
+                            final long consumedMessages = meta != null ? meta.offset() : 0;
+                            partitionConsumes.get(tp.topic()).put(tp.partition(), consumedMessages);
+                        }
                     }
                     final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
                     statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
