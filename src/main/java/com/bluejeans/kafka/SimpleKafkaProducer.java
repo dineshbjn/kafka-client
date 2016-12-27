@@ -3,9 +3,11 @@
  */
 package com.bluejeans.kafka;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -44,6 +46,7 @@ public class SimpleKafkaProducer<K, V> {
     private boolean async = false;
     private Callback callback;
     private final EnumCounter<Status> statusCounter = new EnumCounter<Status>(Status.class);
+    private final Map<String, AtomicLong> topicCounts = new HashMap<>();
 
     @PostConstruct
     public void init() {
@@ -81,6 +84,20 @@ public class SimpleKafkaProducer<K, V> {
         return send(record.topic() + ":" + record.partition(), record.key(), record.value());
     }
 
+    public void incrementCount(final String topic) {
+        AtomicLong count = topicCounts.get(topic);
+        if (count == null) {
+            synchronized (this) {
+                count = topicCounts.get(topic);
+                if (count == null) {
+                    count = new AtomicLong();
+                    topicCounts.put(topic, count);
+                }
+            }
+        }
+        count.incrementAndGet();
+    }
+
     public boolean send(final String topic, final K key, final V value) {
         boolean status = true;
         if (async) {
@@ -89,8 +106,10 @@ public class SimpleKafkaProducer<K, V> {
                     final String[] topicInfo = topicStr.split(":");
                     producer.send(new ProducerRecord<K, V>(topicInfo[0], Integer.valueOf(topicInfo[1]), key, value),
                             callback);
+                    incrementCount(topicInfo[0]);
                 } else {
                     producer.send(new ProducerRecord<K, V>(topicStr, key, value), callback);
+                    incrementCount(topicStr);
                 }
                 statusCounter.incrementEventCount(Status.RECORDS_SENT);
             }
@@ -102,8 +121,10 @@ public class SimpleKafkaProducer<K, V> {
                         producer.send(
                                 new ProducerRecord<K, V>(topicInfo[0], Integer.parseInt(topicInfo[1]), key, value),
                                 callback).get();
+                        incrementCount(topicInfo[0]);
                     } else {
                         producer.send(new ProducerRecord<K, V>(topicStr, key, value), callback).get();
+                        incrementCount(topicStr);
                     }
                     statusCounter.incrementEventCount(Status.RECORDS_SENT);
                     status &= true;
