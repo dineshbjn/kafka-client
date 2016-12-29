@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import com.bluejeans.utils.EnumCounter;
 import com.bluejeans.utils.MetaUtil;
+import com.google.common.collect.Lists;
 
 /**
  * Kafka String based consumer
@@ -60,7 +61,7 @@ public class SimpleKafkaConsumer<K, V> {
     private Deserializer<V> valueDeserializer;
     private String topic;
     private boolean specificPartitions = false;
-    private int pollTimeout = 2000;
+    private int pollTimeout = 10000;
     private int monitorSleepMillis = 10000;
     private Map<String, Object> extraProps = new HashMap<>();
     private final List<KafkaConsumer<K, V>> consumers = new ArrayList<>();
@@ -156,49 +157,135 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
+    public class KafkaMonitorThread extends Thread {
+        /*
+         * (non-Javadoc)
+         *
+         * @see java.lang.Thread#run()
+         */
+        @Override
+        public void run() {
+            final Map<String, List<PartitionInfo>> allMap = monitor.listTopics();
+            final List<TopicPartition> monPartitions = new ArrayList<>();
+            for (final String topic : topics) {
+                for (final PartitionInfo info : allMap.get(topic)) {
+                    monPartitions.add(new TopicPartition(info.topic(), info.partition()));
+                }
+            }
+            try {
+                MetaUtil.findFirstMethod(monitor.getClass(), "assign", 1).invoke(monitor, monPartitions);
+            } catch (final ReflectiveOperationException roe) {
+                logger.error("could not assign", roe);
+            }
+            try {
+                while (running.get()) {
+                    for (final String topic : topics) {
+                        topicQueueSizes.get(topic).set(0);
+                    }
+                    for (final TopicPartition tp : monPartitions) {
+                        seek(monitor, tp, true);
+                        final long position = monitor.position(tp);
+                        topicQueueSizes.get(tp.topic()).addAndGet(position);
+                        partitionQueueSizes.get(tp.topic()).put(tp.partition(), position);
+                        final Map<Integer, Long> consumeMap = partitionConsumes.get(tp.topic());
+                        if (consumeMap.containsKey(tp.partition())) {
+                            partitionLags.get(tp.topic()).put(tp.partition(),
+                                    partitionQueueSizes.get(tp.topic()).get(tp.partition()).longValue()
+                                            - consumeMap.get(tp.partition()).longValue());
+                        }
+                        topicLags.put(tp.topic(), calculateTopicLag(tp.topic()));
+                    }
+                    Thread.sleep(monitorSleepMillis);
+                }
+            } catch (final WakeupException we) {
+                if (running.get()) {
+                    throw we;
+                }
+            } catch (final InterruptedException ie) {
+                logger.warn("monitor thread interrupted", ie);
+            } finally {
+                monitor.close();
+            }
+        }
+    }
+
     public class KafkaConsumerThread extends Thread {
 
         private final KafkaConsumer<K, V> consumer;
+
+        private final List<TopicPartition> partitions;
 
         private Set<TopicPartition> currentAssignment = new HashSet<>();
 
         /**
          * @param consumer
          */
-        public KafkaConsumerThread(final KafkaConsumer<K, V> consumer) {
+        public KafkaConsumerThread(final KafkaConsumer<K, V> consumer, final List<TopicPartition> partitions) {
             super();
             this.consumer = consumer;
+            this.partitions = partitions;
         }
 
+        /**
+         * fix the consumer positions
+         */
+        public void fixPositions() {
+            synchronized (partitions) {
+                for (final TopicPartition partition : partitions) {
+                    try {
+                        final OffsetAndMetadata meta = consumer.committed(partition);
+                        if (meta != null) {
+                            logger.info("For partition - " + partition + " meta - " + meta);
+                            consumer.seek(partition, meta.offset());
+                        } else {
+                            logger.info("For partition - " + partition + " no meta, seeking to beginning");
+                            seek(consumer, partition, false);
+                        }
+                        logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
+                    } catch (final RuntimeException re) {
+                        logger.warn("could not fix positions", re);
+                    }
+                }
+            }
+        }
+
+        /**
+         * commit sync
+         */
+        public void commitSync() {
+            if (commitSyncEnabled) {
+                try {
+                    consumer.commitSync();
+                } catch (final RuntimeException re) {
+                    logger.error(re.getMessage() + "\nCommit failed for " + currentAssignment);
+                }
+            }
+        }
+
+        /*
+         * (non-Javadoc)
+         *
+         * @see java.lang.Thread#run()
+         */
         @Override
         public void run() {
             if (specificPartitions) {
                 try {
                     MetaUtil.findFirstMethod(consumer.getClass(), "assign", 1).invoke(consumer, partitions);
+                    fixPositions();
                 } catch (final ReflectiveOperationException roe) {
                     logger.error("could not assign", roe);
-                }
-                for (final TopicPartition partition : partitions) {
-                    final OffsetAndMetadata meta = consumer.committed(partition);
-                    if (meta != null) {
-                        logger.info("For partition - " + partition + " meta - " + meta);
-                        consumer.seek(partition, meta.offset());
-                    } else {
-                        logger.info("For partition - " + partition + " no meta, seeking to beginning");
-                        seek(consumer, partition, false);
-                    }
-                    logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
                 }
             } else {
                 try {
                     MetaUtil.findFirstMethod(consumer.getClass(), "subscribe", 1).invoke(consumer,
                             new ArrayList<>(topics));
+                    ensureAssignment(consumer);
                 } catch (final ReflectiveOperationException roe) {
                     logger.error("could not subscribe", roe);
                 }
             }
             try {
-                ensureAssignment(consumer);
                 while (running.get()) {
                     currentAssignment = consumer.assignment();
                     if (monitorEnabled) {
@@ -210,8 +297,8 @@ public class SimpleKafkaConsumer<K, V> {
                     }
                     final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
                     statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
-                    if (!commitAfterProcess && commitSyncEnabled) {
-                        consumer.commitSync();
+                    if (!commitAfterProcess) {
+                        commitSync();
                     }
                     // Handle records
                     if (recordProcessors != null) {
@@ -234,8 +321,8 @@ public class SimpleKafkaConsumer<K, V> {
                             }
                         }
                     }
-                    if (commitAfterProcess && commitSyncEnabled) {
-                        consumer.commitSync();
+                    if (commitAfterProcess) {
+                        commitSync();
                     }
                 }
             } catch (final WakeupException we) {
@@ -287,65 +374,25 @@ public class SimpleKafkaConsumer<K, V> {
                 partitionConsumes.put(topic, new ConcurrentHashMap<Integer, Long>());
                 partitionLags.put(topic, new ConcurrentHashMap<Integer, Long>());
             }
-            monitorThread = new Thread() {
-                @Override
-                public void run() {
-                    final Map<String, List<PartitionInfo>> allMap = monitor.listTopics();
-                    final List<TopicPartition> monPartitions = new ArrayList<>();
-                    for (final String topic : topics) {
-                        for (final PartitionInfo info : allMap.get(topic)) {
-                            monPartitions.add(new TopicPartition(info.topic(), info.partition()));
-                        }
-                    }
-                    try {
-                        MetaUtil.findFirstMethod(monitor.getClass(), "assign", 1).invoke(monitor, monPartitions);
-                    } catch (final ReflectiveOperationException roe) {
-                        logger.error("could not assign", roe);
-                    }
-                    try {
-                        while (running.get()) {
-                            for (final String topic : topics) {
-                                topicQueueSizes.get(topic).set(0);
-                            }
-                            for (final TopicPartition tp : monPartitions) {
-                                seek(monitor, tp, true);
-                                final long position = monitor.position(tp);
-                                topicQueueSizes.get(tp.topic()).addAndGet(position);
-                                partitionQueueSizes.get(tp.topic()).put(tp.partition(), position);
-                                final Map<Integer, Long> consumeMap = partitionConsumes.get(tp.topic());
-                                if (consumeMap.containsKey(tp.partition())) {
-                                    partitionLags.get(tp.topic()).put(tp.partition(),
-                                            partitionQueueSizes.get(tp.topic()).get(tp.partition()).longValue()
-                                                    - consumeMap.get(tp.partition()).longValue());
-                                }
-                                topicLags.put(tp.topic(), calculateTopicLag(tp.topic()));
-                            }
-                            Thread.sleep(monitorSleepMillis);
-                        }
-                    } catch (final WakeupException we) {
-                        if (running.get()) {
-                            throw we;
-                        }
-                    } catch (final InterruptedException ie) {
-                        logger.warn("monitor thread interrupted", ie);
-                    } finally {
-                        monitor.close();
-                    }
-                }
-            };
-            monitorThread.setName(name + "-monitor");
             if (monitorEnabled) {
+                monitorThread = new KafkaMonitorThread();
+                monitorThread.setName(name + "-monitor");
                 monitorThread.start();
             }
             runThreads.clear();
-            for (int index = 0; index < consumerCount; index++) {
-                final KafkaConsumerThread runThread = new KafkaConsumerThread(
-                        SimpleKafkaConsumer.this.consumers.get(index));
-                runThread.setName(name + "-" + index);
-                runThread.start();
-                runThreads.add(runThread);
+            if (!partitions.isEmpty()) {
+                final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
+                        (int) Math.ceil((double) partitions.size() / consumerCount));
+                for (int index = 0; index < consumerPartitions.size(); index++) {
+                    final KafkaConsumerThread runThread = new KafkaConsumerThread(
+                            SimpleKafkaConsumer.this.consumers.get(index), consumerPartitions.get(index));
+                    runThread.setName(name + "-" + index);
+                    runThread.start();
+                    runThreads.add(runThread);
+                }
             }
         }
+
     }
 
     private void update() {
@@ -386,6 +433,7 @@ public class SimpleKafkaConsumer<K, V> {
      */
     public synchronized void addTopicPartition(final String topicPartition) {
         final Set<String> topicSet = new HashSet<String>(Arrays.asList(this.topic.split(",")));
+        topicSet.remove("");
         if (topicSet.add(topicPartition)) {
             logger.warn("Adding topic-partition - " + topicPartition);
             this.topic = StringUtils.join(topicSet, ',');
