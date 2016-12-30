@@ -343,56 +343,57 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
-    public synchronized void start() {
-        if (!running.get()) {
-            running.set(true);
-            topicQueueSizes.clear();
-            partitionQueueSizes.clear();
-            partitionConsumes.clear();
-            partitionLags.clear();
-            topicLags.clear();
-            partitions.clear();
-            topics.clear();
-            if (specificPartitions) {
-                for (final String topic : topic.split(",")) {
-                    final String[] t = topic.split(":");
-                    topicQueueSizes.put(t[0], new AtomicLong());
-                    topics.add(topic);
-                    if (t.length > 1) {
-                        final TopicPartition tp = new TopicPartition(t[0], Integer.parseInt(t[1]));
-                        partitions.add(tp);
+    public void start() {
+        synchronized (this.server) {
+            if (!running.get()) {
+                running.set(true);
+                topicQueueSizes.clear();
+                partitionQueueSizes.clear();
+                partitionConsumes.clear();
+                partitionLags.clear();
+                topicLags.clear();
+                partitions.clear();
+                topics.clear();
+                if (specificPartitions) {
+                    for (final String topic : topic.split(",")) {
+                        final String[] t = topic.split(":");
+                        topicQueueSizes.put(t[0], new AtomicLong());
+                        topics.add(topic);
+                        if (t.length > 1) {
+                            final TopicPartition tp = new TopicPartition(t[0], Integer.parseInt(t[1]));
+                            partitions.add(tp);
+                        }
+                    }
+                } else {
+                    for (final String topic : Arrays.asList(topic.split(","))) {
+                        topics.add(topic);
+                        topicQueueSizes.put(topic, new AtomicLong());
                     }
                 }
-            } else {
-                for (final String topic : Arrays.asList(topic.split(","))) {
-                    topics.add(topic);
-                    topicQueueSizes.put(topic, new AtomicLong());
+                for (final String topic : topics) {
+                    partitionQueueSizes.put(topic, new HashMap<Integer, Long>());
+                    partitionConsumes.put(topic, new ConcurrentHashMap<Integer, Long>());
+                    partitionLags.put(topic, new ConcurrentHashMap<Integer, Long>());
                 }
-            }
-            for (final String topic : topics) {
-                partitionQueueSizes.put(topic, new HashMap<Integer, Long>());
-                partitionConsumes.put(topic, new ConcurrentHashMap<Integer, Long>());
-                partitionLags.put(topic, new ConcurrentHashMap<Integer, Long>());
-            }
-            if (monitorEnabled) {
-                monitorThread = new KafkaMonitorThread();
-                monitorThread.setName(name + "-monitor");
-                monitorThread.start();
-            }
-            runThreads.clear();
-            if (!partitions.isEmpty()) {
-                final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
-                        (int) Math.ceil((double) partitions.size() / consumerCount));
-                for (int index = 0; index < consumerPartitions.size(); index++) {
-                    final KafkaConsumerThread runThread = new KafkaConsumerThread(
-                            SimpleKafkaConsumer.this.consumers.get(index), consumerPartitions.get(index));
-                    runThread.setName(name + "-" + index);
-                    runThread.start();
-                    runThreads.add(runThread);
+                if (monitorEnabled) {
+                    monitorThread = new KafkaMonitorThread();
+                    monitorThread.setName(name + "-monitor");
+                    monitorThread.start();
+                }
+                runThreads.clear();
+                if (!partitions.isEmpty()) {
+                    final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
+                            (int) Math.ceil((double) partitions.size() / consumerCount));
+                    for (int index = 0; index < consumerPartitions.size(); index++) {
+                        final KafkaConsumerThread runThread = new KafkaConsumerThread(
+                                SimpleKafkaConsumer.this.consumers.get(index), consumerPartitions.get(index));
+                        runThread.setName(name + "-" + index);
+                        runThread.start();
+                        runThreads.add(runThread);
+                    }
                 }
             }
         }
-
     }
 
     private void update() {
