@@ -48,7 +48,7 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
             }
             final List<String> items = partitionInfos.stream().map(pi -> String.valueOf(pi.partition()))
                     .collect(Collectors.toList());
-            zkHelper.lockSomeAsync(lockPrefix + "/" + topic + "/", items, max, new LockListener() {
+            zkHelper.lockSomeAsync(lockPrefix + "/" + topic + "/" + getGroupId() + "/", items, max, new LockListener() {
                 @Override
                 public void lockObtained(final String prefix, final String path, final ZKLock zkLock) {
                     locks.put(topic + ":" + path, zkLock);
