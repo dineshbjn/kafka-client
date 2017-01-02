@@ -435,7 +435,7 @@ public class SimpleKafkaConsumer<K, V> {
     public synchronized void addTopicPartition(final String topicPartition, final int maxPartitions) {
         final Set<String> topicSet = new HashSet<String>(Arrays.asList(this.topic.split(",")));
         topicSet.remove("");
-        if (topicSet.size() < maxPartitions && topicSet.add(topicPartition)) {
+        if (partitions.size() < maxPartitions && topicSet.add(topicPartition)) {
             logger.warn("Adding topic-partition - " + topicPartition);
             this.topic = StringUtils.join(topicSet, ',');
             update();
