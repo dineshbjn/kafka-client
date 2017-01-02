@@ -213,17 +213,17 @@ public class SimpleKafkaConsumer<K, V> {
 
         private final KafkaConsumer<K, V> consumer;
 
-        private final List<TopicPartition> partitions;
+        private final List<TopicPartition> currentPartitions = new ArrayList<>();
 
         private Set<TopicPartition> currentAssignment = new HashSet<>();
 
         /**
          * @param consumer
          */
-        public KafkaConsumerThread(final KafkaConsumer<K, V> consumer, final List<TopicPartition> partitions) {
+        public KafkaConsumerThread(final KafkaConsumer<K, V> consumer, final List<TopicPartition> currentPartitions) {
             super();
             this.consumer = consumer;
-            this.partitions = partitions;
+            this.currentPartitions.addAll(currentPartitions);
         }
 
         /**
@@ -231,7 +231,7 @@ public class SimpleKafkaConsumer<K, V> {
          */
         public void fixPositions() {
             synchronized (partitions) {
-                for (final TopicPartition partition : partitions) {
+                for (final TopicPartition partition : currentPartitions) {
                     try {
                         final OffsetAndMetadata meta = consumer.committed(partition);
                         if (meta != null) {
@@ -271,7 +271,7 @@ public class SimpleKafkaConsumer<K, V> {
         public void run() {
             if (specificPartitions) {
                 try {
-                    MetaUtil.findFirstMethod(consumer.getClass(), "assign", 1).invoke(consumer, partitions);
+                    MetaUtil.findFirstMethod(consumer.getClass(), "assign", 1).invoke(consumer, currentPartitions);
                     fixPositions();
                 } catch (final ReflectiveOperationException roe) {
                     logger.error("could not assign", roe);
@@ -382,14 +382,16 @@ public class SimpleKafkaConsumer<K, V> {
                 }
                 runThreads.clear();
                 if (!partitions.isEmpty()) {
-                    final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
-                            (int) Math.ceil((double) partitions.size() / consumerCount));
-                    for (int index = 0; index < consumerPartitions.size(); index++) {
-                        final KafkaConsumerThread runThread = new KafkaConsumerThread(
-                                SimpleKafkaConsumer.this.consumers.get(index), consumerPartitions.get(index));
-                        runThread.setName(name + "-" + index);
-                        runThread.start();
-                        runThreads.add(runThread);
+                    synchronized (partitions) {
+                        final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
+                                (int) Math.ceil((double) partitions.size() / consumerCount));
+                        for (int index = 0; index < consumerPartitions.size(); index++) {
+                            final KafkaConsumerThread runThread = new KafkaConsumerThread(
+                                    SimpleKafkaConsumer.this.consumers.get(index), consumerPartitions.get(index));
+                            runThread.setName(name + "-" + index);
+                            runThread.start();
+                            runThreads.add(runThread);
+                        }
                     }
                 }
             }

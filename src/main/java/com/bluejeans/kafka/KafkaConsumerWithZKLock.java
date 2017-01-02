@@ -28,7 +28,8 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
 
     private String lockPrefix;
     private int maxPartitions = 4;
-    private final Map<String, ZKLock> locks = new ConcurrentHashMap<>();
+    private final Map<String, ZKLock> allLocks = new ConcurrentHashMap<>();
+    private final Map<String, ZKLock> currentLocks = new ConcurrentHashMap<>();
 
     @Override
     @PostConstruct
@@ -37,33 +38,35 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
         setSpecificPartitions(true);
         final List<String> topics = Arrays.asList(getTopic().split(","));
         setTopic("");
-        for (final String topic : topics) {
+        for (final String topicName : topics) {
             int max = maxPartitions;
-            final List<PartitionInfo> partitionInfos = getConsumers().get(0).partitionsFor(topic);
+            final List<PartitionInfo> partitionInfos = getConsumers().get(0).partitionsFor(topicName);
             if (partitionInfos == null) {
-                throw new RuntimeException("Topic not found - " + topic);
+                throw new RuntimeException("Topic not found - " + topicName);
             }
             if (max > partitionInfos.size()) {
                 max = partitionInfos.size();
             }
+            final String pathPrefix = lockPrefix + "/" + topicName + "/" + getGroupId() + "/";
             final List<String> items = partitionInfos.stream().map(pi -> String.valueOf(pi.partition()))
                     .collect(Collectors.toList());
-            zkHelper.lockSomeAsync(lockPrefix + "/" + topic + "/" + getGroupId() + "/", items, max, new LockListener() {
+            items.forEach(i -> allLocks.put(pathPrefix + i, new ZKLock(zkHelper.getZkClient(), pathPrefix + i)));
+            zkHelper.lockSomeAsync(allLocks, max, new LockListener() {
                 @Override
-                public void lockObtained(final String prefix, final String path, final ZKLock zkLock) {
-                    locks.put(topic + ":" + path, zkLock);
+                public void lockObtained(final String path, final ZKLock zkLock) {
+                    currentLocks.put(topicName + ":" + path.substring(path.lastIndexOf('/') + 1), zkLock);
                     try {
-                        addTopicPartition(topic + ":" + path, maxPartitions);
+                        addTopicPartition(topicName + ":" + path.substring(path.lastIndexOf('/') + 1), maxPartitions);
                     } catch (final RuntimeException re) {
                         logger.error("Problem starting the consumer", re);
                     }
                 }
 
                 @Override
-                public void lockReleased(final String prefix, final String path, final ZKLock zkLock) {
-                    locks.remove(topic + ":" + path);
+                public void lockReleased(final String path, final ZKLock zkLock) {
+                    currentLocks.remove(topicName + ":" + path.substring(path.lastIndexOf('/') + 1));
                     try {
-                        removeTopicPartition(topic + ":" + path);
+                        // removeTopicPartition(topic + ":" + path.substring(path.lastIndexOf('/') + 1));
                     } catch (final RuntimeException re) {
                         logger.error("Problem starting the consumer", re);
                     }
@@ -77,7 +80,8 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
     @PreDestroy
     public void shutdown() {
         super.shutdown();
-        locks.values().forEach(l -> l.release());
+        currentLocks.values().forEach(l -> l.release());
+        zkHelper.cancelAll(allLocks.values());
     }
 
     // @RegistryAttribute(name = "queues", type = "array")
@@ -143,13 +147,6 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
      */
     public void setMaxPartitions(final int maxPartitions) {
         this.maxPartitions = maxPartitions;
-    }
-
-    /**
-     * @return the locks
-     */
-    public Map<String, ZKLock> getLocks() {
-        return locks;
     }
 
 }
