@@ -400,7 +400,7 @@ public class SimpleKafkaConsumer<K, V> {
 
     private void update() {
         logger.info("Updating the consumer...");
-        shutdown();
+        preShutdown();
         preInit();
         // assign();
         runThreads.clear();
@@ -419,8 +419,7 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
-    @PreDestroy
-    public void shutdown() {
+    public void preShutdown() {
         running.set(false);
         for (final KafkaConsumer<K, V> consumer : consumers) {
             consumer.wakeup();
@@ -429,6 +428,11 @@ public class SimpleKafkaConsumer<K, V> {
         if (simpleProducer != null) {
             simpleProducer.shutdown();
         }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        preShutdown();
     }
 
     /**
@@ -476,6 +480,13 @@ public class SimpleKafkaConsumer<K, V> {
         logger.warn("Re-assigning topic " + this.topic + " -> " + topic);
         this.topic = topic;
         update();
+    }
+
+    /**
+     * @return the current partition size
+     */
+    public int getPartitionSize() {
+        return partitions.size();
     }
 
     /**

@@ -54,21 +54,27 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
             zkHelper.lockSomeAsync(allLocks, max, new LockListener() {
                 @Override
                 public void lockObtained(final String path, final ZKLock zkLock) {
-                    currentLocks.put(topicName + ":" + path.substring(path.lastIndexOf('/') + 1), zkLock);
-                    try {
-                        addTopicPartition(topicName + ":" + path.substring(path.lastIndexOf('/') + 1), maxPartitions);
-                    } catch (final RuntimeException re) {
-                        logger.error("Problem starting the consumer", re);
+                    final String tp = topicName + ":" + path.substring(path.lastIndexOf('/') + 1);
+                    synchronized (zkHelper) {
+                        currentLocks.put(tp, zkLock);
+                        try {
+                            addTopicPartition(tp);
+                        } catch (final RuntimeException re) {
+                            logger.error("Problem starting the consumer", re);
+                        }
                     }
                 }
 
                 @Override
                 public void lockReleased(final String path, final ZKLock zkLock) {
-                    currentLocks.remove(topicName + ":" + path.substring(path.lastIndexOf('/') + 1));
-                    try {
-                        // removeTopicPartition(topic + ":" + path.substring(path.lastIndexOf('/') + 1));
-                    } catch (final RuntimeException re) {
-                        logger.error("Problem starting the consumer", re);
+                    final String tp = topicName + ":" + path.substring(path.lastIndexOf('/') + 1);
+                    synchronized (zkHelper) {
+                        currentLocks.remove(tp, zkLock);
+                        try {
+                            removeTopicPartition(tp);
+                        } catch (final RuntimeException re) {
+                            logger.error("Problem starting the consumer", re);
+                        }
                     }
                 }
             });
