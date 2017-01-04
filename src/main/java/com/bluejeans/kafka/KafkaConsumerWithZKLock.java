@@ -37,6 +37,7 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
     public void init() {
         preInit();
         setSpecificPartitions(true);
+        start();
         final List<String> topics = Arrays.asList(getTopic().split(","));
         setTopic("");
         for (final String topicName : topics) {
@@ -79,7 +80,6 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
                 }
             });
         }
-        // start();
     }
 
     @Override
