@@ -28,6 +28,7 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
 
     private String lockPrefix;
     private int maxPartitions = 4;
+    private boolean liveUpdateEnabled = true;
     private final Map<String, ZKLock> allLocks = new ConcurrentHashMap<>();
     private final Map<String, ZKLock> currentLocks = new ConcurrentHashMap<>();
 
@@ -39,26 +40,25 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
         final List<String> topics = Arrays.asList(getTopic().split(","));
         setTopic("");
         for (final String topicName : topics) {
-            int max = maxPartitions;
             final List<PartitionInfo> partitionInfos = getConsumers().get(0).partitionsFor(topicName);
             if (partitionInfos == null) {
                 throw new RuntimeException("Topic not found - " + topicName);
             }
-            if (max > partitionInfos.size()) {
-                max = partitionInfos.size();
+            if (maxPartitions > partitionInfos.size()) {
+                maxPartitions = partitionInfos.size();
             }
             final String pathPrefix = lockPrefix + "/" + topicName + "/" + getGroupId() + "/";
             final List<String> items = partitionInfos.stream().map(pi -> String.valueOf(pi.partition()))
                     .collect(Collectors.toList());
             items.forEach(i -> allLocks.put(pathPrefix + i, new ZKLock(zkHelper.getZkClient(), pathPrefix + i)));
-            zkHelper.lockSomeAsync(allLocks, max, new LockListener() {
+            zkHelper.lockSomeAsync(allLocks, maxPartitions, new LockListener() {
                 @Override
                 public void lockObtained(final String path, final ZKLock zkLock) {
                     final String tp = topicName + ":" + path.substring(path.lastIndexOf('/') + 1);
                     synchronized (zkHelper) {
                         currentLocks.put(tp, zkLock);
                         try {
-                            addTopicPartition(tp);
+                            addTopicPartition(tp, liveUpdateEnabled && currentLocks.size() <= getConsumerCount());
                         } catch (final RuntimeException re) {
                             logger.error("Problem starting the consumer", re);
                         }
@@ -71,7 +71,7 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
                     synchronized (zkHelper) {
                         currentLocks.remove(tp, zkLock);
                         try {
-                            removeTopicPartition(tp);
+                            removeTopicPartition(tp, liveUpdateEnabled && currentLocks.size() < getConsumerCount());
                         } catch (final RuntimeException re) {
                             logger.error("Problem starting the consumer", re);
                         }
@@ -153,6 +153,21 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
      */
     public void setMaxPartitions(final int maxPartitions) {
         this.maxPartitions = maxPartitions;
+    }
+
+    /**
+     * @return the liveUpdateEnabled
+     */
+    public boolean isLiveUpdateEnabled() {
+        return liveUpdateEnabled;
+    }
+
+    /**
+     * @param liveUpdateEnabled
+     *            the liveUpdateEnabled to set
+     */
+    public void setLiveUpdateEnabled(final boolean liveUpdateEnabled) {
+        this.liveUpdateEnabled = liveUpdateEnabled;
     }
 
 }

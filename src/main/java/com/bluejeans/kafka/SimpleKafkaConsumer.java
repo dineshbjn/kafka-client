@@ -343,6 +343,56 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
+    public void processTopic(final String topic) {
+        if (specificPartitions) {
+            final String[] t = topic.split(":");
+            topicQueueSizes.put(t[0], new AtomicLong());
+            topics.add(topic);
+            if (t.length > 1) {
+                final TopicPartition tp = new TopicPartition(t[0], Integer.parseInt(t[1]));
+                partitions.add(tp);
+            }
+        } else {
+            topics.add(topic);
+            topicQueueSizes.put(topic, new AtomicLong());
+        }
+        partitionQueueSizes.put(topic, new HashMap<Integer, Long>());
+        partitionConsumes.put(topic, new ConcurrentHashMap<Integer, Long>());
+        partitionLags.put(topic, new ConcurrentHashMap<Integer, Long>());
+    }
+
+    private void addRunThread(final List<TopicPartition> currentPartitions) {
+        final KafkaConsumerThread runThread = new KafkaConsumerThread(consumers.get(runThreads.size()),
+                currentPartitions);
+        runThread.setName(name + "-" + consumers.get(runThreads.size()).hashCode());
+        runThread.start();
+        runThreads.add(runThread);
+    }
+
+    private void removeRunThread(final String topicPartition) {
+        int tpIndex = -1;
+        final String[] tpInfo = topicPartition.split(":");
+        for (int index = 0; index < runThreads.size(); index++) {
+            if (runThreads.get(index).currentPartitions.size() == 1 && runThreads.get(index).currentPartitions.get(0)
+                    .equals(new TopicPartition(tpInfo[0], Integer.parseInt(tpInfo[1])))) {
+                tpIndex = index;
+                break;
+            }
+        }
+        if (tpIndex >= 0) {
+            removeRunThread(tpIndex);
+        }
+    }
+
+    private synchronized void removeRunThread(final int index) {
+        try {
+            runThreads.get(index).consumer.wakeup();
+            runThreads.remove(index);
+        } catch (final WakeupException we) {
+            // expected because we are still running
+        }
+    }
+
     public void start() {
         synchronized (this.server) {
             if (!running.get()) {
@@ -354,26 +404,8 @@ public class SimpleKafkaConsumer<K, V> {
                 topicLags.clear();
                 partitions.clear();
                 topics.clear();
-                if (specificPartitions) {
-                    for (final String topic : topic.split(",")) {
-                        final String[] t = topic.split(":");
-                        topicQueueSizes.put(t[0], new AtomicLong());
-                        topics.add(topic);
-                        if (t.length > 1) {
-                            final TopicPartition tp = new TopicPartition(t[0], Integer.parseInt(t[1]));
-                            partitions.add(tp);
-                        }
-                    }
-                } else {
-                    for (final String topic : Arrays.asList(topic.split(","))) {
-                        topics.add(topic);
-                        topicQueueSizes.put(topic, new AtomicLong());
-                    }
-                }
-                for (final String topic : topics) {
-                    partitionQueueSizes.put(topic, new HashMap<Integer, Long>());
-                    partitionConsumes.put(topic, new ConcurrentHashMap<Integer, Long>());
-                    partitionLags.put(topic, new ConcurrentHashMap<Integer, Long>());
+                for (final String topic : topic.split(",")) {
+                    processTopic(topic);
                 }
                 if (monitorEnabled) {
                     monitorThread = new KafkaMonitorThread();
@@ -386,11 +418,7 @@ public class SimpleKafkaConsumer<K, V> {
                         final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
                                 (int) Math.ceil((double) partitions.size() / consumerCount));
                         for (int index = 0; index < consumerPartitions.size(); index++) {
-                            final KafkaConsumerThread runThread = new KafkaConsumerThread(
-                                    SimpleKafkaConsumer.this.consumers.get(index), consumerPartitions.get(index));
-                            runThread.setName(name + "-" + index);
-                            runThread.start();
-                            runThreads.add(runThread);
+                            addRunThread(consumerPartitions.get(index));
                         }
                     }
                 }
@@ -451,25 +479,34 @@ public class SimpleKafkaConsumer<K, V> {
     /**
      * Add a topic-partition
      */
-    public synchronized void addTopicPartition(final String topicPartition) {
+    public synchronized void addTopicPartition(final String topicPartition, final boolean live) {
         final Set<String> topicSet = new HashSet<String>(Arrays.asList(this.topic.split(",")));
         topicSet.remove("");
         if (topicSet.add(topicPartition)) {
             logger.warn("Adding topic-partition - " + topicPartition);
             this.topic = StringUtils.join(topicSet, ',');
-            update();
+            if (live) {
+                final String[] tpInfo = topicPartition.split(":");
+                addRunThread(Arrays.asList(new TopicPartition(tpInfo[0], Integer.parseInt(tpInfo[1]))));
+            } else {
+                update();
+            }
         }
     }
 
     /**
      * Add a topic-partition
      */
-    public synchronized void removeTopicPartition(final String topicPartition) {
+    public synchronized void removeTopicPartition(final String topicPartition, final boolean live) {
         final Set<String> topicSet = new HashSet<String>(Arrays.asList(this.topic.split(",")));
         if (topicSet.remove(topicPartition)) {
             logger.warn("Removing topic-partition - " + topicPartition);
             this.topic = StringUtils.join(topicSet, ',');
-            update();
+            if (live) {
+                removeRunThread(topicPartition);
+            } else {
+                update();
+            }
         }
     }
 
