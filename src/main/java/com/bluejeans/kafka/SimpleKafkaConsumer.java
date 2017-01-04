@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.IntStream;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -213,7 +214,7 @@ public class SimpleKafkaConsumer<K, V> {
 
         private final KafkaConsumer<K, V> consumer;
 
-        private final List<TopicPartition> currentPartitions = new ArrayList<>();
+        private List<TopicPartition> currentPartitions;
 
         private Set<TopicPartition> currentAssignment = new HashSet<>();
 
@@ -223,7 +224,10 @@ public class SimpleKafkaConsumer<K, V> {
         public KafkaConsumerThread(final KafkaConsumer<K, V> consumer, final List<TopicPartition> currentPartitions) {
             super();
             this.consumer = consumer;
-            this.currentPartitions.addAll(currentPartitions);
+            if (currentPartitions != null) {
+                this.currentPartitions = new ArrayList<>();
+                this.currentPartitions.addAll(currentPartitions);
+            }
         }
 
         /**
@@ -231,19 +235,21 @@ public class SimpleKafkaConsumer<K, V> {
          */
         public void fixPositions() {
             synchronized (partitions) {
-                for (final TopicPartition partition : currentPartitions) {
-                    try {
-                        final OffsetAndMetadata meta = consumer.committed(partition);
-                        if (meta != null) {
-                            logger.info("For partition - " + partition + " meta - " + meta);
-                            consumer.seek(partition, meta.offset());
-                        } else {
-                            logger.info("For partition - " + partition + " no meta, seeking to beginning");
-                            seek(consumer, partition, false);
+                if (currentPartitions != null) {
+                    for (final TopicPartition partition : currentPartitions) {
+                        try {
+                            final OffsetAndMetadata meta = consumer.committed(partition);
+                            if (meta != null) {
+                                logger.info("For partition - " + partition + " meta - " + meta);
+                                consumer.seek(partition, meta.offset());
+                            } else {
+                                logger.info("For partition - " + partition + " no meta, seeking to beginning");
+                                seek(consumer, partition, false);
+                            }
+                            logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
+                        } catch (final RuntimeException re) {
+                            logger.warn("could not fix positions", re);
                         }
-                        logger.info("Partition - " + partition + " @ position - " + consumer.position(partition));
-                    } catch (final RuntimeException re) {
-                        logger.warn("could not fix positions", re);
                     }
                 }
             }
@@ -361,7 +367,7 @@ public class SimpleKafkaConsumer<K, V> {
         partitionLags.put(topic, new ConcurrentHashMap<Integer, Long>());
     }
 
-    private void addRunThread(final List<TopicPartition> currentPartitions) {
+    public void addRunThread(final List<TopicPartition> currentPartitions) {
         final KafkaConsumerThread runThread = new KafkaConsumerThread(consumers.get(runThreads.size()),
                 currentPartitions);
         runThread.setName(name + "-" + consumers.get(runThreads.size()).hashCode());
@@ -369,7 +375,7 @@ public class SimpleKafkaConsumer<K, V> {
         runThreads.add(runThread);
     }
 
-    private void removeRunThread(final String topicPartition) {
+    public void removeRunThread(final String topicPartition) {
         int tpIndex = -1;
         final String[] tpInfo = topicPartition.split(":");
         for (int index = 0; index < runThreads.size(); index++) {
@@ -384,7 +390,7 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
-    private synchronized void removeRunThread(final int index) {
+    public synchronized void removeRunThread(final int index) {
         try {
             runThreads.get(index).consumer.wakeup();
             runThreads.remove(index);
@@ -413,7 +419,9 @@ public class SimpleKafkaConsumer<K, V> {
                     monitorThread.start();
                 }
                 runThreads.clear();
-                if (!partitions.isEmpty()) {
+                if (!specificPartitions) {
+                    IntStream.range(0, consumerCount).forEach(i -> addRunThread(null));
+                } else if (!partitions.isEmpty()) {
                     synchronized (partitions) {
                         final List<List<TopicPartition>> consumerPartitions = Lists.partition(partitions,
                                 (int) Math.ceil((double) partitions.size() / consumerCount));
@@ -426,7 +434,7 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
-    private void update() {
+    public void update() {
         logger.info("Updating the consumer...");
         preShutdown();
         preInit();

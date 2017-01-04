@@ -28,6 +28,9 @@ public class KafkaConsumerWithLockTest {
         consumer.setServer("10.5.7.246:9092");
         consumer.setTopic("indigo-aggregator-test");
         consumer.init();
+        Thread.sleep(1000);
+        System.out.println(consumer.getRunThreads());
+        // Thread.sleep(100000);
     }
 
 }
