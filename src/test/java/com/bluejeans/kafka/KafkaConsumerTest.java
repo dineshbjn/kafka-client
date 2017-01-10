@@ -18,11 +18,15 @@ public class KafkaConsumerTest {
         consumer.setTopic("indigo");
         consumer.setConsumerCount(4);
         consumer.setRepostEnabled(true);
+        consumer.setMonitorEnabled(true);
         consumer.init();
         Thread.sleep(2000);
         System.out.println(consumer.getRunThreads());
         System.out.println(consumer.getTopicLag());
         SimpleKafkaConsumer.seek(consumer.getConsumer(), new TopicPartition("indigo", 0), true);
+        consumer.pause();
+        Thread.sleep(1000);
+        consumer.resume();
     }
 
 }

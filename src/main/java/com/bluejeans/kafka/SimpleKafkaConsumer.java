@@ -48,6 +48,7 @@ public class SimpleKafkaConsumer<K, V> {
         RECORDS_POLLED, PROCESS_ERROR,
     }
 
+    private static final TopicPartition[] emptyTPs = new TopicPartition[0];
     private static final Logger logger = LoggerFactory.getLogger(SimpleKafkaConsumer.class);
     private static final String MONITOR_GROUP_ID = "__kafkamonitor__";
 
@@ -268,6 +269,20 @@ public class SimpleKafkaConsumer<K, V> {
             }
         }
 
+        /**
+         * pauses the consumption
+         */
+        public void pauseConsume() {
+            consumer.pause(currentAssignment.toArray(emptyTPs));
+        }
+
+        /**
+         * resumes the consumption
+         */
+        public void resumeConsume() {
+            consumer.resume(currentAssignment.toArray(emptyTPs));
+        }
+
         /*
          * (non-Javadoc)
          *
@@ -397,6 +412,14 @@ public class SimpleKafkaConsumer<K, V> {
         } catch (final WakeupException we) {
             // expected because we are still running
         }
+    }
+
+    public void pause() {
+        runThreads.forEach(r -> r.pauseConsume());
+    }
+
+    public void resume() {
+        runThreads.forEach(r -> r.resumeConsume());
     }
 
     public void start() {
