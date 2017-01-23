@@ -56,6 +56,7 @@ public class SimpleKafkaConsumer<K, V> {
     private String groupId = "local";
     private boolean enableAutoCommit = false;
     private boolean commitSyncEnabled = true;
+    private boolean autoCreateEnabled = true;
     private boolean repostEnabled = false;
     private int autoCommitIntervalMillis = 1000;
     private int sessionTimeoutMillis = 30000;
@@ -219,6 +220,8 @@ public class SimpleKafkaConsumer<K, V> {
 
         private Set<TopicPartition> currentAssignment = new HashSet<>();
 
+        private final AtomicBoolean running = new AtomicBoolean();
+
         /**
          * @param consumer
          */
@@ -281,6 +284,22 @@ public class SimpleKafkaConsumer<K, V> {
          */
         public void resumeConsume() {
             consumer.resume(currentAssignment.toArray(emptyTPs));
+        }
+
+        public void stopRunning() {
+            running.set(false);
+            consumer.wakeup();
+        }
+
+        /*
+         * (non-Javadoc)
+         *
+         * @see java.lang.Thread#start()
+         */
+        @Override
+        public synchronized void start() {
+            running.set(true);
+            super.start();
         }
 
         /*
@@ -351,6 +370,7 @@ public class SimpleKafkaConsumer<K, V> {
                     throw we;
                 }
             } finally {
+                consumer.unsubscribe();
                 consumer.close();
             }
         }
@@ -368,7 +388,7 @@ public class SimpleKafkaConsumer<K, V> {
         if (specificPartitions) {
             final String[] t = topic.split(":");
             topicQueueSizes.put(t[0], new AtomicLong());
-            topics.add(topic);
+            topics.add(t[0]);
             if (t.length > 1) {
                 final TopicPartition tp = new TopicPartition(t[0], Integer.parseInt(t[1]));
                 partitions.add(tp);
@@ -407,7 +427,7 @@ public class SimpleKafkaConsumer<K, V> {
 
     public synchronized void removeRunThread(final int index) {
         try {
-            runThreads.get(index).consumer.wakeup();
+            runThreads.get(index).stopRunning();
             runThreads.remove(index);
         } catch (final WakeupException we) {
             // expected because we are still running
@@ -480,9 +500,7 @@ public class SimpleKafkaConsumer<K, V> {
 
     public void preShutdown() {
         running.set(false);
-        for (final KafkaConsumer<K, V> consumer : consumers) {
-            consumer.wakeup();
-        }
+        runThreads.forEach(r -> r.stopRunning());
         monitor.wakeup();
         if (simpleProducer != null) {
             simpleProducer.shutdown();
@@ -919,6 +937,21 @@ public class SimpleKafkaConsumer<K, V> {
      */
     public void setCommitAfterProcess(final boolean commitAfterProcess) {
         this.commitAfterProcess = commitAfterProcess;
+    }
+
+    /**
+     * @return the autoCreateEnabled
+     */
+    public boolean isAutoCreateEnabled() {
+        return autoCreateEnabled;
+    }
+
+    /**
+     * @param autoCreateEnabled
+     *            the autoCreateEnabled to set
+     */
+    public void setAutoCreateEnabled(final boolean autoCreateEnabled) {
+        this.autoCreateEnabled = autoCreateEnabled;
     }
 
 }

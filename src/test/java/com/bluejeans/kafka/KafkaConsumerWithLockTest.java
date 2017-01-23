@@ -3,6 +3,8 @@
  */
 package com.bluejeans.kafka;
 
+import java.util.Arrays;
+
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -16,10 +18,11 @@ import com.bluejeans.utils.zookeeper.ZkHelper;
  */
 public class KafkaConsumerWithLockTest {
 
-    //test with locks
+    // test with locks
     @Test
     public void testWithLocks() throws Exception {
-        final CuratorFramework client = CuratorFrameworkFactory.newClient("10.5.7.65:2181", new ExponentialBackoffRetry(1000, 3));
+        final CuratorFramework client = CuratorFrameworkFactory.newClient("10.5.7.65:2181",
+                new ExponentialBackoffRetry(1000, 3));
         final ZkHelper helper = new ZkHelper(client);
         final KafkaConsumerWithZKLock<String, String> consumer = new KafkaConsumerWithZKLock<>();
         consumer.setZkHelper(helper);
@@ -27,10 +30,12 @@ public class KafkaConsumerWithLockTest {
         consumer.setGroupId("test-consumer");
         consumer.setServer("10.5.7.246:9092");
         consumer.setTopic("indigo-aggregator-test");
+        consumer.setConsumerCount(4);
+        final LoggerKafkaRecordProcessor logger = new LoggerKafkaRecordProcessor();
+        consumer.setRecordProcessors(Arrays.asList(logger));
         consumer.init();
         Thread.sleep(1000);
         System.out.println(consumer.getRunThreads());
-        // Thread.sleep(100000);
     }
 
 }
