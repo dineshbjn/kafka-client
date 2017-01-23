@@ -86,6 +86,7 @@ public class SimpleKafkaConsumer<K, V> {
     private final Map<String, Long> topicLags = new HashMap<>();
     private final List<TopicPartition> partitions = new ArrayList<TopicPartition>();
     private final Set<String> topics = new HashSet<>();
+    private Properties consumerProps;
 
     @PostConstruct
     public void init() {
@@ -95,16 +96,16 @@ public class SimpleKafkaConsumer<K, V> {
     }
 
     public void preInit() {
-        final Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, server);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, enableAutoCommit);
+        consumerProps = new Properties();
+        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, server);
+        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, enableAutoCommit);
         if (enableAutoCommit) {
-            props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, autoCommitIntervalMillis);
+            consumerProps.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, autoCommitIntervalMillis);
         }
-        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeoutMillis);
+        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeoutMillis);
         if (extraProps != null) {
-            props.putAll(extraProps);
+            consumerProps.putAll(extraProps);
         }
         if (keyDeserializer == null) {
             keyDeserializer = new ObjectDeserializer<K>();
@@ -121,7 +122,7 @@ public class SimpleKafkaConsumer<K, V> {
         monitor = new KafkaConsumer<K, V>(monitorProps, keyDeserializer, valueDeserializer);
         consumers.clear();
         for (int index = 0; index < consumerCount; index++) {
-            consumers.add(new KafkaConsumer<K, V>(props, keyDeserializer, valueDeserializer));
+            consumers.add(new KafkaConsumer<K, V>(consumerProps, keyDeserializer, valueDeserializer));
         }
         if (repostEnabled) {
             simpleProducer = new SimpleKafkaProducer<>();
@@ -403,6 +404,9 @@ public class SimpleKafkaConsumer<K, V> {
     }
 
     public void addRunThread(final List<TopicPartition> currentPartitions) {
+        if (consumers.size() <= runThreads.size()) {
+            consumers.add(new KafkaConsumer<K, V>(consumerProps, keyDeserializer, valueDeserializer));
+        }
         final KafkaConsumerThread runThread = new KafkaConsumerThread(consumers.get(runThreads.size()),
                 currentPartitions);
         runThread.setName(name + "-" + consumers.get(runThreads.size()).hashCode());
