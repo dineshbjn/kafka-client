@@ -59,7 +59,7 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
                     synchronized (zkHelper) {
                         currentLocks.put(tp, zkLock);
                         try {
-                            addTopicPartition(tp, liveUpdateEnabled && currentLocks.size() <= getConsumerCount());
+                            addTopicPartition(tp, liveUpdateEnabled || currentLocks.size() <= getConsumerCount());
                         } catch (final RuntimeException re) {
                             logger.error("Problem starting the consumer", re);
                         }
@@ -72,7 +72,7 @@ public class KafkaConsumerWithZKLock<K, V> extends SimpleKafkaConsumer<K, V> {
                     synchronized (zkHelper) {
                         currentLocks.remove(tp, zkLock);
                         try {
-                            removeTopicPartition(tp, liveUpdateEnabled && currentLocks.size() < getConsumerCount());
+                            removeTopicPartition(tp, liveUpdateEnabled || currentLocks.size() < getConsumerCount());
                         } catch (final RuntimeException re) {
                             logger.error("Problem starting the consumer", re);
                         }
