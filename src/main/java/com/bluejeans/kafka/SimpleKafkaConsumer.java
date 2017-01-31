@@ -56,7 +56,7 @@ public class SimpleKafkaConsumer<K, V> {
     private String groupId = "local";
     private boolean enableAutoCommit = false;
     private boolean commitSyncEnabled = true;
-    private boolean autoCreateEnabled = true;
+    private boolean autoCreateEnabled = false;
     private boolean repostEnabled = false;
     private int autoCommitIntervalMillis = 1000;
     private int sessionTimeoutMillis = 30000;
@@ -86,6 +86,10 @@ public class SimpleKafkaConsumer<K, V> {
     private final Map<String, Long> topicLags = new HashMap<>();
     private final List<TopicPartition> partitions = new ArrayList<TopicPartition>();
     private final Set<String> topics = new HashSet<>();
+    private String zkHost = "localhost:2181";
+    private KafkaUtil kafkaUtil;
+    private final int defaultPartitionCount = 8;
+    private final int defaultReplicationCount = 1;
     private Properties consumerProps;
 
     @PostConstruct
@@ -96,6 +100,7 @@ public class SimpleKafkaConsumer<K, V> {
     }
 
     public void preInit() {
+        kafkaUtil = new KafkaUtil(zkHost);
         consumerProps = new Properties();
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, server);
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
@@ -213,6 +218,16 @@ public class SimpleKafkaConsumer<K, V> {
         }
     }
 
+    public void createTopicIfNotExists(final String topic) {
+        createTopicIfNotExists(topic, defaultPartitionCount, defaultReplicationCount);
+    }
+
+    public void createTopicIfNotExists(final String topic, final int partitionCount, final int replicationCount) {
+        if (!kafkaUtil.topicExists(topic)) {
+            kafkaUtil.createTopic(topic, partitionCount, replicationCount);
+        }
+    }
+
     public class KafkaConsumerThread extends Thread {
 
         private final KafkaConsumer<K, V> consumer;
@@ -312,6 +327,9 @@ public class SimpleKafkaConsumer<K, V> {
         public void run() {
             if (specificPartitions) {
                 try {
+                    if (autoCreateEnabled) {
+                        currentPartitions.forEach(tp -> createTopicIfNotExists(tp.topic()));
+                    }
                     MetaUtil.findFirstMethod(consumer.getClass(), "assign", 1).invoke(consumer, currentPartitions);
                     fixPositions();
                 } catch (final ReflectiveOperationException roe) {
@@ -319,6 +337,9 @@ public class SimpleKafkaConsumer<K, V> {
                 }
             } else {
                 try {
+                    if (autoCreateEnabled) {
+                        topics.forEach(t -> createTopicIfNotExists(t));
+                    }
                     MetaUtil.findFirstMethod(consumer.getClass(), "subscribe", 1).invoke(consumer,
                             new ArrayList<>(topics));
                     ensureAssignment(consumer);
@@ -956,6 +977,91 @@ public class SimpleKafkaConsumer<K, V> {
      */
     public void setAutoCreateEnabled(final boolean autoCreateEnabled) {
         this.autoCreateEnabled = autoCreateEnabled;
+    }
+
+    /**
+     * @return the zkHost
+     */
+    public String getZkHost() {
+        return zkHost;
+    }
+
+    /**
+     * @param zkHost
+     *            the zkHost to set
+     */
+    public void setZkHost(final String zkHost) {
+        this.zkHost = zkHost;
+    }
+
+    /**
+     * @return the simpleProducer
+     */
+    public SimpleKafkaProducer<K, V> getSimpleProducer() {
+        return simpleProducer;
+    }
+
+    /**
+     * @return the topicQueueSizes
+     */
+    public Map<String, AtomicLong> getTopicQueueSizes() {
+        return topicQueueSizes;
+    }
+
+    /**
+     * @return the partitionQueueSizes
+     */
+    public Map<String, Map<Integer, Long>> getPartitionQueueSizes() {
+        return partitionQueueSizes;
+    }
+
+    /**
+     * @return the partitionConsumes
+     */
+    public Map<String, Map<Integer, Long>> getPartitionConsumes() {
+        return partitionConsumes;
+    }
+
+    /**
+     * @return the partitionLags
+     */
+    public Map<String, Map<Integer, Long>> getPartitionLags() {
+        return partitionLags;
+    }
+
+    /**
+     * @return the topicLags
+     */
+    public Map<String, Long> getTopicLags() {
+        return topicLags;
+    }
+
+    /**
+     * @return the partitions
+     */
+    public List<TopicPartition> getPartitions() {
+        return partitions;
+    }
+
+    /**
+     * @return the topics
+     */
+    public Set<String> getTopics() {
+        return topics;
+    }
+
+    /**
+     * @return the kafkaUtil
+     */
+    public KafkaUtil getKafkaUtil() {
+        return kafkaUtil;
+    }
+
+    /**
+     * @return the consumerProps
+     */
+    public Properties getConsumerProps() {
+        return consumerProps;
     }
 
 }
