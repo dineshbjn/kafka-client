@@ -45,7 +45,7 @@ import com.google.common.collect.Lists;
 public class SimpleKafkaConsumer<K, V> {
 
     public static enum Status {
-        RECORDS_POLLED, PROCESS_ERROR,
+        RECORDS_POLLED, PROCESS_ERROR, RECORD_REPOST,
     }
 
     private static final TopicPartition[] emptyTPs = new TopicPartition[0];
@@ -358,12 +358,14 @@ public class SimpleKafkaConsumer<K, V> {
                         }
                     }
                     final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
+                    logger.info("{\"groupId\":\"" + groupId + "\", \"polledRecords\":" + records.count() + "}");
                     statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
                     if (!commitAfterProcess) {
                         commitSync();
                     }
                     // Handle records
                     if (recordProcessors != null) {
+                        final long beforeTime = System.currentTimeMillis();
                         for (final ConsumerRecord<K, V> record : records) {
                             boolean failed = false;
                             final KafkaProcessorContext<K, V> context = new KafkaProcessorContext<K, V>(record);
@@ -380,8 +382,11 @@ public class SimpleKafkaConsumer<K, V> {
                             }
                             if (repostEnabled && failed) {
                                 simpleProducer.send(record);
+                                statusCounter.incrementEventCount(Status.RECORD_REPOST);
                             }
                         }
+                        final long processTime = System.currentTimeMillis() - beforeTime;
+                        logger.info("{\"groupId\":\"" + groupId + "\", \"processTime\":" + processTime + "}");
                     }
                     if (commitAfterProcess) {
                         commitSync();
