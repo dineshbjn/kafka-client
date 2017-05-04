@@ -88,7 +88,7 @@ public class SimpleKafkaConsumer<K, V> {
     private final Set<String> topics = new HashSet<>();
     private String zkHost = "localhost:2181";
     private KafkaUtil kafkaUtil;
-    private final boolean pollLoggingEnabled = false;
+    private boolean pollLoggingEnabled = false;
     private final int defaultPartitionCount = 8;
     private final int defaultReplicationCount = 1;
     private Properties consumerProps;
@@ -1070,6 +1070,21 @@ public class SimpleKafkaConsumer<K, V> {
      */
     public Properties getConsumerProps() {
         return consumerProps;
+    }
+
+    /**
+     * @return the pollLoggingEnabled
+     */
+    public boolean isPollLoggingEnabled() {
+        return pollLoggingEnabled;
+    }
+
+    /**
+     * @param pollLoggingEnabled
+     *            the pollLoggingEnabled to set
+     */
+    public void setPollLoggingEnabled(final boolean pollLoggingEnabled) {
+        this.pollLoggingEnabled = pollLoggingEnabled;
     }
 
 }
