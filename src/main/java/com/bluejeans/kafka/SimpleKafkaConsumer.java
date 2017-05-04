@@ -88,6 +88,7 @@ public class SimpleKafkaConsumer<K, V> {
     private final Set<String> topics = new HashSet<>();
     private String zkHost = "localhost:2181";
     private KafkaUtil kafkaUtil;
+    private final boolean pollLoggingEnabled = false;
     private final int defaultPartitionCount = 8;
     private final int defaultReplicationCount = 1;
     private Properties consumerProps;
@@ -385,9 +386,11 @@ public class SimpleKafkaConsumer<K, V> {
                             }
                         }
                     }
-                    final long processTime = System.currentTimeMillis() - beforeTime;
-                    logger.info("{\"groupId\":\"" + groupId + "\", \"polledRecords\":" + records.count()
-                            + ", \"processTime\":" + processTime + "}");
+                    if (pollLoggingEnabled) {
+                        final long processTime = System.currentTimeMillis() - beforeTime;
+                        logger.info("{\"groupId\":\"" + groupId + "\", \"polledRecords\":" + records.count()
+                                + ", \"processTime\":" + processTime + "}");
+                    }
                     if (commitAfterProcess) {
                         commitSync();
                     }
