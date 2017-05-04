@@ -358,14 +358,13 @@ public class SimpleKafkaConsumer<K, V> {
                         }
                     }
                     final ConsumerRecords<K, V> records = consumer.poll(pollTimeout);
-                    logger.info("{\"groupId\":\"" + groupId + "\", \"polledRecords\":" + records.count() + "}");
                     statusCounter.incrementEventCount(Status.RECORDS_POLLED, records.count());
                     if (!commitAfterProcess) {
                         commitSync();
                     }
                     // Handle records
+                    final long beforeTime = System.currentTimeMillis();
                     if (recordProcessors != null) {
-                        final long beforeTime = System.currentTimeMillis();
                         for (final ConsumerRecord<K, V> record : records) {
                             boolean failed = false;
                             final KafkaProcessorContext<K, V> context = new KafkaProcessorContext<K, V>(record);
@@ -385,9 +384,10 @@ public class SimpleKafkaConsumer<K, V> {
                                 statusCounter.incrementEventCount(Status.RECORD_REPOST);
                             }
                         }
-                        final long processTime = System.currentTimeMillis() - beforeTime;
-                        logger.info("{\"groupId\":\"" + groupId + "\", \"processTime\":" + processTime + "}");
                     }
+                    final long processTime = System.currentTimeMillis() - beforeTime;
+                    logger.info("{\"groupId\":\"" + groupId + "\", \"polledRecords\":" + records.count()
+                            + ", \"processTime\":" + processTime + "}");
                     if (commitAfterProcess) {
                         commitSync();
                     }
