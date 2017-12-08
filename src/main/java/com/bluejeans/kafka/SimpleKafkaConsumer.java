@@ -386,7 +386,7 @@ public class SimpleKafkaConsumer<K, V> {
                             }
                         }
                     }
-                    if (pollLoggingEnabled) {
+                    if (pollLoggingEnabled && !records.isEmpty()) {
                         final long processTime = System.currentTimeMillis() - beforeTime;
                         logger.info("{\"groupId\":\"" + groupId + "\", \"polledRecords\":" + records.count()
                                 + ", \"processTime\":" + processTime + "}");
